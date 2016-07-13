@@ -389,6 +389,21 @@ def multiprocess_pool(function_helper, parameters, cpu):
         collect_list.append(x)
     return collect_list
 
+def P_adjust_BH(infile, p_column):
+    outfile = '%s.P_adjusted_BH.txt' %(os.path.splitext(infile)[0])
+    Rscript = '%s.P_adjusted_BH.R' %(os.path.splitext(infile)[0])
+    Rcmd='''
+x <- read.table("%s")
+p <- x[,%s]
+q <- p.adjust(p, "BH")
+x_1 <- cbind(x, q)
+write.table(x_1, file="%s", sep="\\t", quote=FALSE, row.names=FALSE, col.names=FALSE)
+
+''' %(infile, p_column, outfile)
+    ofile = open(Rscript, 'w')
+    print >> ofile, Rcmd
+    ofile.close()
+    os.system('cat %s | R --slave' %(Rscript))
 
 ##run function with parameters using multiprocess of #cpu
 #def multiprocess_pool_fisher(parameters, cpu):
@@ -451,11 +466,21 @@ def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu):
             print 'running fisher exact test'
             print parameters, cpu
             multiprocess_pool(fisher_test_helper, parameters, cpu)
-    #MSU7_w200_s50.Chr4.control.overalp.window_sum
-    merge_chr = 'cat %s_part*.fisher_test.txt > %s.fisher_test.txt' %(collect[0], collect[0])
-    merge_all = 'cat %s.Chr*.fisher_test.txt > %s.fisher_test.txt' %(os.path.splitext(genome_window)[0], os.path.splitext(genome_window)[0]) 
-    os.system(merge_chr)
-    os.system(merge_all)
+        #merge_chr = 'cat %s_part*.fisher_test.txt > %s.fisher_test.txt' %(table, table)
+        #os.system(merge_chr)
+    merge_all = 'cat %s.Chr*.fisher_test.txt > %s.fisher_test.txt' %(os.path.splitext(genome_window)[0], os.path.splitext(genome_window)[0])
+    merge_CG  = 'grep "CG" %s.fisher_test.txt > %s.fisher_test.CG.txt' %(os.path.splitext(genome_window)[0], os.path.splitext(genome_window)[0])
+    merge_CHG = 'grep "CHG" %s.fisher_test.txt > %s.fisher_test.CHG.txt' %(os.path.splitext(genome_window)[0], os.path.splitext(genome_window)[0])
+    merge_CHH = 'grep "CHH" %s.fisher_test.txt > %s.fisher_test.CHH.txt' %(os.path.splitext(genome_window)[0], os.path.splitext(genome_window)[0])
+    if not os.path.exists('%s.fisher_test.txt' %(os.path.splitext(genome_window)[0])):
+        os.system(merge_all)
+    if not os.path.exists('%s.fisher_test.CG.txt' %(os.path.splitext(genome_window)[0])):
+        os.system(merge_CG)
+        os.system(merge_CHG)
+        os.system(merge_CHH)
+        P_adjust_BH('%s.fisher_test.CG.txt' %(os.path.splitext(genome_window)[0]), 9)
+        P_adjust_BH('%s.fisher_test.CHG.txt' %(os.path.splitext(genome_window)[0]), 9)
+        P_adjust_BH('%s.fisher_test.CHH.txt' %(os.path.splitext(genome_window)[0]), 9)
 
 def main():
     parser = argparse.ArgumentParser()
