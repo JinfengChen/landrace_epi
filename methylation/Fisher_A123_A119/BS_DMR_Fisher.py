@@ -8,7 +8,7 @@ import argparse
 import glob
 import gzip
 import multiprocessing as mp
-from scipy.stats import binom_test
+from scipy.stats import binom_test, fisher_exact
 from Bio import SeqIO
 sys.path.append('/rhome/cjinfeng/BigData/software/ProgramPython/lib')
 from utility import gff_parser, createdir
@@ -80,9 +80,34 @@ def split_chr_files(infile):
         data[chrs].close()
     return bed_files
 
+
+#get gziped file size: line numbers
+def cal_filesize_gzip(filename):
+    f = gzip.open(filename, 'rb')                  
+    lines = 0
+    buf_size = 1024 * 1024
+    read_f = f.read # loop optimization
+
+    buf = read_f(buf_size)
+    while buf:
+        lines += buf.count('\n')
+        buf = read_f(buf_size)
+
+    return lines
+
+#chunk file by line into "numbers" of files
+def chunk_files_gzip(infile, numbers):
+    filesize  = cal_filesize_gzip(infile)
+    splitline = filesize//numbers
+    unzip_infile = os.path.splitext(infile)[0]
+    if not os.path.exists(unzip_infile):
+        os.system('gunzip -c %s > %s' %(infile, unzip_infile))
+    if not os.path.exists('%s_part00' %(unzip_infile)): 
+        os.system('split -l %s %s %s_part -d' %(splitline, unzip_infile, unzip_infile)) 
+
 #get gziped file size: line numbers
 def cal_filesize(filename):
-    f = gzip.open(filename, 'rb')                  
+    f = open(filename, 'r')                  
     lines = 0
     buf_size = 1024 * 1024
     read_f = f.read # loop optimization
@@ -99,10 +124,10 @@ def chunk_files(infile, numbers):
     filesize  = cal_filesize(infile)
     splitline = filesize//numbers
     unzip_infile = os.path.splitext(infile)[0]
-    if not os.path.exists(unzip_infile):
-        os.system('gunzip -c %s > %s' %(infile, unzip_infile))
-    if not os.path.exists('%s_part00' %(unzip_infile)): 
-        os.system('split -l %s %s %s_part -d' %(splitline, unzip_infile, unzip_infile)) 
+    #if not os.path.exists(unzip_infile):
+    #    os.system('gunzip -c %s > %s' %(infile, unzip_infile))
+    if not os.path.exists('%s_part00' %(infile)): 
+        os.system('split -l %s %s %s_part -d' %(splitline, infile, infile)) 
 
 
 #read non_conversion_rate from existing file
@@ -153,9 +178,19 @@ def binomial_test_helper(args):
     return binomial_test_file(*args)
 
 ##run function with parameters using multiprocess of #cpu
-def multiprocess_pool(function_helper, parameters, cpu):
+#def multiprocess_pool(function_helper, parameters, cpu):
+#    pool = mp.Pool(int(cpu))
+#    imap_it = pool.map(function_helper, tuple(parameters))
+#    collect_list = []
+#    for x in imap_it:
+        #print 'status: %s' %(x)
+#        collect_list.append(x)
+#    return collect_list
+
+##run function with parameters using multiprocess of #cpu
+def multiprocess_pool_fisher(parameters, cpu):
     pool = mp.Pool(int(cpu))
-    imap_it = pool.map(function_helper, tuple(parameters))
+    imap_it = pool.map(fisher_test_helper, tuple(parameters))
     collect_list = []
     for x in imap_it:
         #print 'status: %s' %(x)
@@ -188,7 +223,7 @@ def methylated_C(infile, cpu):
     print '%s, non conversion rate: %s' %(infile, p)
 
     #split file into chunks
-    chunk_files(infile, 100)
+    chunk_files_gzip(infile, 100)
 
     #call methylation
     chunks = glob.glob('%s_part*' %(os.path.splitext(infile)[0]))
@@ -212,8 +247,9 @@ def sum_window_cytosine(infile):
     p['CG'] = 0.001
     p['CHG'] = 0.001
     p['CHH'] = 0.001
-
     outfile = '%s.window_sum' %(infile)
+    if os.path.exists(outfile):
+        return outfile
     ofile = open(outfile, 'w')
     data = defaultdict(lambda : defaultdict(lambda : defaultdict(lambda : int())))
     current_win = ''
@@ -279,7 +315,7 @@ def chr_summary(bed, min_depth, control_methC, treat_methC):
     bed_control_olp = '%s.control.overalp' %(os.path.splitext(bed)[0])
     bed_treat_olp = '%s.treat.overalp' %(os.path.splitext(bed)[0])
     cmd1 = 'bedtools intersect -a %s -b %s -wao > %s 2> %s.log' %(bed, control_methC, bed_control_olp, bed_control_olp)
-    cmd2 = 'bedtools intersect -a %s -b %s -wao > %s 2> %s.log' %(bed, treat_methC, bed_treat_olp, bed_control_olp)
+    cmd2 = 'bedtools intersect -a %s -b %s -wao > %s 2> %s.log' %(bed, treat_methC, bed_treat_olp, bed_treat_olp)
     print cmd1
     print cmd2
     if not os.path.exists(bed_control_olp):
@@ -288,13 +324,83 @@ def chr_summary(bed, min_depth, control_methC, treat_methC):
         os.system(cmd2)
     control_sum = sum_window_cytosine(bed_control_olp) 
     treat_sum   = sum_window_cytosine(bed_treat_olp)
-    cmd3 = 'paste %s %s > %s.control_treat.window_sum' %(control_sum, treat_sum, os.path.splitext(bed)[0]) 
-    os.system(cmd3)
+    if not os.path.exists('%s.control_treat.window_sum' %(os.path.splitext(bed)[0])):
+        cmd3 = 'paste %s %s > %s.control_treat.window_sum' %(control_sum, treat_sum, os.path.splitext(bed)[0]) 
+        os.system(cmd3)
+    return '%s.control_treat.window_sum' %(os.path.splitext(bed)[0])
 
 def chr_summary_helper(args):
     return chr_summary(*args)
+
+#			 CG	 mCG	 CHG	 mCHG	 CHH	 mCHH
+#Chr12   23100   23300   1       21      11      6       50      0       Chr12   23100   23300   6       16      5       12      52      0
+def fisher_test_file(infile):
+    print 'in fisher function'
+    ofile = open('%s.fisher_test.txt' %(infile), 'w')
+    with open (infile, 'r') as filehd:
+        for line in filehd:
+            line = line.rstrip()
+            if len(line) > 2: 
+                unit = re.split(r'\t',line)
+                #CG
+                if not 'NA' in [unit[3], unit[4], unit[12], unit[13]]:
+                    c1   = int(unit[3])
+                    mc1  = int(unit[4])
+                    c2   = int(unit[12])
+                    mc2  = int(unit[13])
+                    oddsratio, pvalue  = fisher_exact([[c1, mc1], [c2, mc2]])
+                    print >> ofile, '%s\t%s\t%s\tCG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(c1), str(mc1), str(c2), str(mc2), str(pvalue))
+                else:
+                    print >> ofile, '%s\t%s\t%s\tCG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[3], unit[4], unit[12], unit[13], 'NA')
+                #CHG
+                if not 'NA' in [unit[5], unit[6], unit[14], unit[15]]:
+                    chg1   = int(unit[5])
+                    mchg1  = int(unit[6])
+                    chg2   = int(unit[14])
+                    mchg2  = int(unit[15])
+                    oddsratio, pvalue  = fisher_exact([[chg1, mchg1], [chg2, mchg2]])
+                    print >> ofile, '%s\t%s\t%s\tCHG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(chg1), str(mchg1), str(chg2), str(mchg2), str(pvalue))
+                else:
+                    print >> ofile, '%s\t%s\t%s\tCHG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[5], unit[6], unit[14], unit[15], 'NA')
+                #CHH
+                if not 'NA' in [unit[7], unit[8], unit[16], unit[17]]:
+                    chh1   = int(unit[7])
+                    mchh1  = int(unit[8])
+                    chh2   = int(unit[16])
+                    mchh2  = int(unit[17])        
+                    oddsratio, pvalue  = fisher_exact([[chh1, mchh1], [chh2, mchh2]])
+                    print >> ofile, '%s\t%s\t%s\tCHH\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(chh1), str(mchh1), str(chh2), str(mchh2), str(pvalue))                
+                else:
+                    print >> ofile, '%s\t%s\t%s\tCHH\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[7], unit[8], unit[16], unit[17], 'NA')
+    ofile.close()
+    return 1
+
+def fisher_test_helper(args):
+    print 'in helper'
+    return fisher_test_file(*args)
+
+##run function with parameters using multiprocess of #cpu
+def multiprocess_pool(function_helper, parameters, cpu):
+    pool = mp.Pool(int(cpu))
+    imap_it = pool.map(function_helper, tuple(parameters))
+    collect_list = []
+    for x in imap_it:
+        #print 'status: %s' %(x)
+        collect_list.append(x)
+    return collect_list
+
+
+##run function with parameters using multiprocess of #cpu
+#def multiprocess_pool_fisher(parameters, cpu):
+#    pool = mp.Pool(int(cpu))
+#    imap_it = pool.map(fisher_test_helper, tuple(parameters))
+#    collect_list = []
+#    for x in imap_it:
+        #print 'status: %s' %(x)
+#        collect_list.append(x)
+#    return collect_list
  
-def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC):
+def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu):
     print 'Step2. Call DMR by Fisher exact test'
     #bed files for chromosomes
     genome_window = 'MSU7_w%s_s%s.bed' %(window, step)
@@ -317,19 +423,39 @@ def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC):
     #bedtools intersect -a test.bed -b 1.1.bed -wao | less -S 
     
     #summary cytosine for window on each chromosome
-    #12 chromosome for rice genome
-    cpu = 2
+    #12 chromosome for rice genome, use 2 cpu because of large mem used by bedtools
     parameters = []
     bed_chr_files = sorted(bed_chr_files)
     control_methC_files = sorted(control_methC_files)
     treat_methC_files   = sorted(treat_methC_files)
+    collect = []
     for i in range(0, len(bed_chr_files)):
         parameters.append([bed_chr_files[i], mini_depth, control_methC_files[i], treat_methC_files[i]])
     if 1:
-        collect = multiprocess_pool(chr_summary_helper, parameters, cpu) 
+        collect = multiprocess_pool(chr_summary_helper, parameters, 2) 
     #sum_window_cytosine('MSU7_w200_s50.Chr10.control.overalp')
 
     #cal DMR using Fisher exact test
+    for table in sorted(collect):
+        print table
+        #fisher_test_file(table)
+        chunk_files(table, 100)
+        chunks = glob.glob('%s_part*' %(table)) 
+        parameters = []
+        for chunk in chunks:
+            print chunk
+            parameters.append([chunk])
+        tester = '%s_part00.fisher_test.txt' %(table)
+        print tester
+        if not os.path.exists(tester):
+            print 'running fisher exact test'
+            print parameters, cpu
+            multiprocess_pool(fisher_test_helper, parameters, cpu)
+    #MSU7_w200_s50.Chr4.control.overalp.window_sum
+    merge_chr = 'cat %s_part*.fisher_test.txt > %s.fisher_test.txt' %(collect[0], collect[0])
+    merge_all = 'cat %s.Chr*.fisher_test.txt > %s.fisher_test.txt' %(os.path.splitext(genome_window)[0], os.path.splitext(genome_window)[0]) 
+    os.system(merge_chr)
+    os.system(merge_all)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -363,7 +489,7 @@ def main():
     window = 200
     step   = 50
     mini_depth = 4
-    call_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC)
+    call_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC, args.cpu)
 
 if __name__ == '__main__':
     main()
