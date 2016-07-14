@@ -12,7 +12,7 @@
 start=`date +%s`
 
 module load bedtools
-python BS_DMR_Fisher.py --control A119R1.BSseeker.CGmap.gz --treat A123R1.BSseeker.CGmap.gz --cpu $PBS_NP
+python Methykit_pipe.py --meta methykit.A123_A119.meta --cpu $PBS_NP
 
 end=`date +%s`
 runtime=$((end-start))

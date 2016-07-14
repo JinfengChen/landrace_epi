@@ -7,6 +7,7 @@ import os
 import argparse
 import glob
 import gzip
+import time
 import multiprocessing as mp
 from scipy.stats import binom_test, fisher_exact
 from Bio import SeqIO
@@ -314,8 +315,8 @@ def sum_window_cytosine(infile):
 def chr_summary(bed, min_depth, control_methC, treat_methC):
     bed_control_olp = '%s.control.overalp' %(os.path.splitext(bed)[0])
     bed_treat_olp = '%s.treat.overalp' %(os.path.splitext(bed)[0])
-    cmd1 = 'bedtools intersect -a %s -b %s -wao > %s 2> %s.log' %(bed, control_methC, bed_control_olp, bed_control_olp)
-    cmd2 = 'bedtools intersect -a %s -b %s -wao > %s 2> %s.log' %(bed, treat_methC, bed_treat_olp, bed_treat_olp)
+    cmd1 = 'bedtools intersect -a %s -b %s -wao -sorted > %s 2> %s.log' %(bed, control_methC, bed_control_olp, bed_control_olp)
+    cmd2 = 'bedtools intersect -a %s -b %s -wao -sorted > %s 2> %s.log' %(bed, treat_methC, bed_treat_olp, bed_treat_olp)
     print cmd1
     print cmd2
     if not os.path.exists(bed_control_olp):
@@ -376,8 +377,33 @@ def fisher_test_file(infile):
     return 1
 
 def fisher_test_helper(args):
-    print 'in helper'
     return fisher_test_file(*args)
+
+#Chr1    1006    1006    C       CHH     CC      1.0     1       1       0.006   Chr1    1006    1006    C       CHH     CC      0.0     0       1       1.0     0
+def DMC_fisher_test_file(infile):
+    ofile = open('%s.fisher_test.txt' %(infile), 'w')
+    with open (infile, 'r') as filehd:
+        for line in filehd:
+            line = line.rstrip()
+            if len(line) > 2: 
+                unit = re.split(r'\t',line)
+                if not 'NA' in [unit[7], unit[8], unit[17], unit[18]]:
+                    c1   = int(unit[8]) - int(unit[7])
+                    mc1  = int(unit[7])
+                    c2   = int(unit[18]) - int(unit[17])
+                    mc2  = int(unit[17])
+                    #pvalue = 0.01
+                    oddsratio, pvalue  = fisher_exact([[c1, mc1], [c2, mc2]])
+                    unit[20] = str(pvalue)
+                    print >> ofile, '\t'.join(unit)
+                else:
+                    unit[20] = 'NA'
+                    print >> ofile, '\t'.join(unit)
+    ofile.close()
+    return 1 
+
+def DMC_fisher_test_helper(args):
+    return DMC_fisher_test_file(*args)
 
 ##run function with parameters using multiprocess of #cpu
 def multiprocess_pool(function_helper, parameters, cpu):
@@ -415,16 +441,16 @@ write.table(x_1, file="%s", sep="\\t", quote=FALSE, row.names=FALSE, col.names=F
 #        collect_list.append(x)
 #    return collect_list
  
-def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu):
+def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, prefix):
     print 'Step2. Call DMR by Fisher exact test'
     #bed files for chromosomes
-    genome_window = 'MSU7_w%s_s%s.bed' %(window, step)
+    genome_window = '%s_w%s_s%s.bed' %(prefix, window, step)
     bed_chr_files = []
     if not os.path.exists(genome_window):
         os.system('bedtools makewindows -g %s -w %s -s %s | grep "^Chr" > %s' %(genome, window, step, genome_window))
         bed_chr_files = split_chr_files(genome_window)
     else:
-        bed_chr_files = glob.glob('MSU7_w*_s*.Chr*.bed')
+        bed_chr_files = glob.glob('%s_w*_s*.Chr*.bed' %(prefix))
     #methC file for chromosomes
     tester = '%s.Chr1.bed' %(os.path.splitext(control_methC)[0])
     control_methC_files = []
@@ -452,19 +478,14 @@ def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu):
 
     #cal DMR using Fisher exact test
     for table in sorted(collect):
-        print table
         #fisher_test_file(table)
         chunk_files(table, 100)
         chunks = glob.glob('%s_part*' %(table)) 
         parameters = []
         for chunk in chunks:
-            print chunk
             parameters.append([chunk])
         tester = '%s_part00.fisher_test.txt' %(table)
-        print tester
         if not os.path.exists(tester):
-            print 'running fisher exact test'
-            print parameters, cpu
             multiprocess_pool(fisher_test_helper, parameters, cpu)
         #merge_chr = 'cat %s_part*.fisher_test.txt > %s.fisher_test.txt' %(table, table)
         #os.system(merge_chr)
@@ -482,11 +503,64 @@ def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu):
         P_adjust_BH('%s.fisher_test.CHG.txt' %(os.path.splitext(genome_window)[0]), 9)
         P_adjust_BH('%s.fisher_test.CHH.txt' %(os.path.splitext(genome_window)[0]), 9)
 
+
+def call_DMC(genome, mini_depth, control_methC, treat_methC, cpu, prefix):
+
+    #methC file for chromosomes
+    tester = '%s.Chr1.bed' %(os.path.splitext(control_methC)[0])
+    control_methC_files = []
+    treat_methC_files = []
+    if not os.path.exists(tester):
+        control_methC_files = split_chr_files_gzip(control_methC)
+        treat_methC_files = split_chr_files_gzip(treat_methC)
+    else:
+        control_methC_files = glob.glob('%s.Chr*.bed' %(os.path.splitext(control_methC)[0]))
+        treat_methC_files  = glob.glob('%s.Chr*.bed' %(os.path.splitext(treat_methC)[0]))
+    control_methC_files = sorted(control_methC_files)
+    treat_methC_files   = sorted(treat_methC_files)
+ 
+    #DMC for each chromosome
+    for i in range(len(control_methC_files)):
+        chrs = re.split(r'\.', control_methC_files[i])[-2]
+        #if not chrs == 'Chr1':
+        #    continue
+        table = '%s_%s.cytosine_table' %(prefix, chrs)
+        overlap = 'bedtools intersect -a %s -b %s -wao -f 1 -sorted | grep -v "\-1" > %s' %(control_methC_files[i], treat_methC_files[i], table)
+        if not os.path.exists(table):
+            os.system(overlap)
+        chunk_files(table, 100)
+        chunks = glob.glob('%s_part*' %(table))
+        parameters = []
+        for chunk in chunks:
+            parameters.append([chunk])
+        tester = '%s_part00.fisher_test.txt' %(table)
+        if not os.path.exists(tester):
+            multiprocess_pool(DMC_fisher_test_helper, parameters, cpu)  
+    merge_all = 'cat %s_Chr*.*.fisher_test.txt > %s.cytosine_table.fisher_test.txt' % (prefix, prefix)
+    merge_CG   = 'grep "CG" %s.cytosine_table.fisher_test.txt > %s.cytosine_table.fisher_test.CG.txt' %(prefix, prefix)
+    merge_CHG  = 'grep "CHG" %s.cytosine_table.fisher_test.txt > %s.cytosine_table.fisher_test.CHG.txt' %(prefix, prefix)
+    merge_CHH  = 'grep "CHH" %s.cytosine_table.fisher_test.txt > %s.cytosine_table.fisher_test.CHH.txt' %(prefix, prefix)
+    if not os.path.exists('%s.cytosine_table.fisher_test.txt' %(prefix)): 
+        os.system(merge_all)
+    if not os.path.exists('%s.cytosine_table.fisher_test.CG.txt' %(prefix)):
+        time.sleep(60)
+        print merge_CG
+        print merge_CHG
+        print merge_CHH
+        os.system(merge_CG)
+        os.system(merge_CHG)
+        os.system(merge_CHH)
+        P_adjust_BH('%s.cytosine_table.fisher_test.CG.txt' %(prefix), 20)
+        P_adjust_BH('%s.cytosine_table.fisher_test.CHG.txt' %(prefix), 20)
+        P_adjust_BH('%s.cytosine_table.fisher_test.CHH.txt' %(prefix), 20)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--control')
     parser.add_argument('-t', '--treat')
     parser.add_argument('-g', '--genome')
+    parser.add_argument('-p', '--project')
     parser.add_argument('--cpu')
     parser.add_argument('-v', dest='verbose', action='store_true')
     args = parser.parse_args()
@@ -502,6 +576,17 @@ def main():
     if not args.genome:
         args.genome = '/rhome/cjinfeng/BigData/00.RD/seqlib/GFF/MSU7/MSU_r7.ALL.chrlen'
 
+    if not args.project:
+        args.project = 'MSU7'
+
+    ##cutoff setting
+    #minimum read coverage required to consider cytosine to analysis
+    mini_depth      = 4
+    #minimum number of differetial methylated cytosine required to call DMR
+    diff_mC_per_win = 7
+    #fold changes of methylation level(average level among all cytosine in the window) between comparsion control vs. treat in a window
+    fold_change     = 1.5
+
     #Step1. Call methylated Cytosine by binomial test
     control_methC = '%s.methylation_call.gz' %(os.path.splitext(args.control)[0])
     treat_methC = '%s.methylation_call.gz' %(os.path.splitext(args.treat)[0])
@@ -510,11 +595,14 @@ def main():
     if not os.path.exists(treat_methC):
         methylated_C(args.treat, args.cpu)
 
-    #Step2. Call DMPR by fisher's exact test
+    #Step2. Call DMC by fisher's exact test
+    #bedtools intersect -a test_1.bed -b test_2.bed -wao -f 1 | grep -v "\-1"| less -S
+    call_DMC(args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project)
+
+    #Step3. Call DMR by fisher's exact test
     window = 200
     step   = 50
-    mini_depth = 4
-    call_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC, args.cpu)
+    call_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project)
 
 if __name__ == '__main__':
     main()
