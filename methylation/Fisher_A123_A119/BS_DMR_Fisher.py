@@ -98,12 +98,14 @@ def cal_filesize_gzip(filename):
 
 #chunk file by line into "numbers" of files
 def chunk_files_gzip(infile, numbers):
-    filesize  = cal_filesize_gzip(infile)
-    splitline = filesize//numbers
+    #filesize  = cal_filesize_gzip(infile)
+    #splitline = filesize//numbers
     unzip_infile = os.path.splitext(infile)[0]
     if not os.path.exists(unzip_infile):
         os.system('gunzip -c %s > %s' %(infile, unzip_infile))
-    if not os.path.exists('%s_part00' %(unzip_infile)): 
+    if not os.path.exists('%s_part00' %(unzip_infile)):
+        filesize  = cal_filesize_gzip(infile)
+        splitline = filesize//numbers 
         os.system('split -l %s %s %s_part -d' %(splitline, unzip_infile, unzip_infile)) 
 
 #get gziped file size: line numbers
@@ -122,12 +124,14 @@ def cal_filesize(filename):
 
 #chunk file by line into "numbers" of files
 def chunk_files(infile, numbers):
-    filesize  = cal_filesize(infile)
-    splitline = filesize//numbers
+    #filesize  = cal_filesize(infile)
+    #splitline = filesize//numbers
     unzip_infile = os.path.splitext(infile)[0]
     #if not os.path.exists(unzip_infile):
     #    os.system('gunzip -c %s > %s' %(infile, unzip_infile))
-    if not os.path.exists('%s_part00' %(infile)): 
+    if not os.path.exists('%s_part00' %(infile)):
+        filesize  = cal_filesize(infile)
+        splitline = filesize//numbers 
         os.system('split -l %s %s %s_part -d' %(splitline, infile, infile)) 
 
 
@@ -242,7 +246,7 @@ def methylated_C(infile, cpu):
 #summary mC vs. C for each window in each context
 #Chr1    850     1050    Chr1    1001    1001    C       CHH     CT      1.0     1       1       0
 #Chr1    850     1050    Chr1    1006    1006    C       CHH     CC      0.0     0       1       0
-def sum_window_cytosine(infile):
+def sum_window_cytosine(infile, mini_depth):
     #p value for methylated C for each context
     p = defaultdict(lambda : float())
     p['CG'] = 0.001
@@ -285,16 +289,22 @@ def sum_window_cytosine(infile):
                         del data[last_win]
                     last_win    = current_win
                     #mC vs. C
-                    data[current_win][unit[7]][2] += 1
-                    if float(unit[12]) < p[unit[7]]:
-                        data[current_win][unit[7]][1] += 1
+                    #only consider base has mini_depth coverage
+                    if int(unit[11]) >= mini_depth:
+                        #total
+                        data[current_win][unit[7]][2] += 1
+                        #mC
+                        if float(unit[12]) < p[unit[7]]:
+                            data[current_win][unit[7]][1] += 1
                 else:
                     #mC vs. C
-                    #total cytosine
-                    data[current_win][unit[7]][2] += 1
-                    #mC
-                    if float(unit[12]) < p[unit[7]]:
-                        data[current_win][unit[7]][1] += 1
+                    #only consider base has mini_depth coverage
+                    if int(unit[11]) >= mini_depth:
+                        #total cytosine
+                        data[current_win][unit[7]][2] += 1
+                        #mC
+                        if float(unit[12]) < p[unit[7]]:
+                            data[current_win][unit[7]][1] += 1
     #last window
     for c in ('CG', 'CHG', 'CHH'):
         if data[last_win][c][2] > 0:
@@ -323,8 +333,8 @@ def chr_summary(bed, min_depth, control_methC, treat_methC):
         os.system(cmd1)
     if not os.path.exists(bed_treat_olp):
         os.system(cmd2)
-    control_sum = sum_window_cytosine(bed_control_olp) 
-    treat_sum   = sum_window_cytosine(bed_treat_olp)
+    control_sum = sum_window_cytosine(bed_control_olp, mini_depth) 
+    treat_sum   = sum_window_cytosine(bed_treat_olp, mini_depth)
     if not os.path.exists('%s.control_treat.window_sum' %(os.path.splitext(bed)[0])):
         cmd3 = 'paste %s %s > %s.control_treat.window_sum' %(control_sum, treat_sum, os.path.splitext(bed)[0]) 
         os.system(cmd3)
@@ -380,7 +390,7 @@ def fisher_test_helper(args):
     return fisher_test_file(*args)
 
 #Chr1    1006    1006    C       CHH     CC      1.0     1       1       0.006   Chr1    1006    1006    C       CHH     CC      0.0     0       1       1.0     0
-def DMC_fisher_test_file(infile):
+def DMC_fisher_test_file(infile, mini_depth):
     ofile = open('%s.fisher_test.txt' %(infile), 'w')
     with open (infile, 'r') as filehd:
         for line in filehd:
@@ -395,6 +405,9 @@ def DMC_fisher_test_file(infile):
                     #pvalue = 0.01
                     oddsratio, pvalue  = fisher_exact([[c1, mc1], [c2, mc2]])
                     unit[20] = str(pvalue)
+                    print >> ofile, '\t'.join(unit)
+                elif int(unit[8]) < 4 or int(unit[18]) < 4:
+                    unit[20] = 'NA'
                     print >> ofile, '\t'.join(unit)
                 else:
                     unit[20] = 'NA'
@@ -419,9 +432,11 @@ def P_adjust_BH(infile, p_column):
     outfile = '%s.P_adjusted_BH.txt' %(os.path.splitext(infile)[0])
     Rscript = '%s.P_adjusted_BH.R' %(os.path.splitext(infile)[0])
     Rcmd='''
+#library(qvalue)
 x <- read.table("%s")
 p <- x[,%s]
 q <- p.adjust(p, "BH")
+#qStorey <- qvalue(p = p)
 x_1 <- cbind(x, q)
 write.table(x_1, file="%s", sep="\\t", quote=FALSE, row.names=FALSE, col.names=FALSE)
 
@@ -532,7 +547,7 @@ def call_DMC(genome, mini_depth, control_methC, treat_methC, cpu, prefix):
         chunks = glob.glob('%s_part*' %(table))
         parameters = []
         for chunk in chunks:
-            parameters.append([chunk])
+            parameters.append([chunk, mini_depth])
         tester = '%s_part00.fisher_test.txt' %(table)
         if not os.path.exists(tester):
             multiprocess_pool(DMC_fisher_test_helper, parameters, cpu)  
@@ -550,9 +565,9 @@ def call_DMC(genome, mini_depth, control_methC, treat_methC, cpu, prefix):
         os.system(merge_CG)
         os.system(merge_CHG)
         os.system(merge_CHH)
-        P_adjust_BH('%s.cytosine_table.fisher_test.CG.txt' %(prefix), 20)
-        P_adjust_BH('%s.cytosine_table.fisher_test.CHG.txt' %(prefix), 20)
-        P_adjust_BH('%s.cytosine_table.fisher_test.CHH.txt' %(prefix), 20)
+        P_adjust_BH('%s.cytosine_table.fisher_test.CG.txt' %(prefix), 21)
+        P_adjust_BH('%s.cytosine_table.fisher_test.CHG.txt' %(prefix), 21)
+        P_adjust_BH('%s.cytosine_table.fisher_test.CHH.txt' %(prefix), 21)
 
 
 def main():
@@ -580,7 +595,7 @@ def main():
         args.project = 'MSU7'
 
     ##cutoff setting
-    #minimum read coverage required to consider cytosine to analysis
+    #minimum read coverage required to consider cytosine to analysis: used in DMC and DMR, not in methylation call
     mini_depth      = 4
     #minimum number of differetial methylated cytosine required to call DMR
     diff_mC_per_win = 7
