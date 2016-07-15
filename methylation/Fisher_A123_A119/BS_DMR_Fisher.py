@@ -172,7 +172,7 @@ def binomial_test_file(infile, non_conversion_rate):
                 unit = re.split(r'\t',line)
                 n    = int(unit[7])
                 x    = int(unit[6])
-                p    = binom_test(x, n, p=non_conversion_rate)
+                p    = binom_test(x, n, p=float(non_conversion_rate))
                 #p    = 'NA'
                 unit.append(str(p))
                 print >> ofile, '\t'.join(unit)
