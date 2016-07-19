@@ -322,7 +322,7 @@ def sum_window_cytosine(infile, mini_depth):
 
  
 
-def chr_summary(bed, min_depth, control_methC, treat_methC):
+def chr_summary(bed, mini_depth, control_methC, treat_methC):
     bed_control_olp = '%s.control.overalp' %(os.path.splitext(bed)[0])
     bed_treat_olp = '%s.treat.overalp' %(os.path.splitext(bed)[0])
     cmd1 = 'bedtools intersect -a %s -b %s -wao -sorted > %s 2> %s.log' %(bed, control_methC, bed_control_olp, bed_control_olp)
@@ -346,7 +346,7 @@ def chr_summary_helper(args):
 #			 CG	 mCG	 CHG	 mCHG	 CHH	 mCHH
 #Chr12   23100   23300   1       21      11      6       50      0       Chr12   23100   23300   6       16      5       12      52      0
 def fisher_test_file(infile):
-    print 'in fisher function'
+    #print 'in fisher function'
     ofile = open('%s.fisher_test.txt' %(infile), 'w')
     with open (infile, 'r') as filehd:
         for line in filehd:
@@ -446,6 +446,66 @@ write.table(x_1, file="%s", sep="\\t", quote=FALSE, row.names=FALSE, col.names=F
     ofile.close()
     os.system('cat %s | R --slave' %(Rscript))
 
+
+
+
+#DMR info: 10 col
+#Chr1    950     1150    CG      2       4       0       6       0.454545454545  1
+#DMC info: 22 col
+#Chr1    1128    1128    C       CG      CG      1       7       7       1e-21   Chr1    1128    1128    C       CG      CG      0.88    14      16      9.29867447152e-30       1       1	
+def sum_window_diff_methylated_cytosine(infile, mini_diff):
+    outfile = '%s.window_sum_diffmC' %(infile)
+    if os.path.exists(outfile):
+        return outfile
+    ofile = open(outfile, 'w')
+    data = defaultdict(lambda : defaultdict(lambda : int()))
+    current_win = ''
+    last_win = ''
+    last_unit = []
+    with open (infile, 'r') as filehd:
+        for line in filehd:
+            line = line.rstrip()
+            if len(line) > 2: 
+                unit = re.split(r'\t',line)
+                current_win = '%s_%s_%s' %(unit[0], unit[1], unit[2])
+                #no overlapping cytosine
+                if unit[10] == '.':
+                    sum_line = '%s\t%s' %('\t'.join(unit[:10]), 'NA')
+                    continue
+                #have overlapping cytosine
+                if not current_win == last_win:
+                    #print 'change: %s' %(line)
+                    if data.has_key(last_win):
+                        ##whether this is DMR: 1. number of differential methylated C in the windows
+                        #if data[last_win] >= mini_diff:
+                        sum_line = '%s\t%s\t%s' %('\t'.join(unit[:10]), str(data[last_win]['mC']), str(data[last_win]['C']))
+                        print >> ofile, sum_line
+                        del data[last_win]
+                    last_win    = current_win
+                    #print unit[10], unit[20], unit[30]
+                    #only consider methylated C with Pvalue <= 0.05, which mean differential methylated in two sample
+                    try:
+                        data[current_win]['C'] += 1
+                        if float(unit[30]) <= 0.05:
+                            data[current_win]['mC'] += 1
+                    except:
+                        print 'error: %s' %(line)
+                else:
+                    #print unit[10], unit[20], unit[30]
+                    try:
+                        data[current_win]['C'] += 1
+                        if float(unit[30]) <= 0.05:
+                            data[current_win]['mC'] += 1
+                    except:
+                        print 'error: %s' %(line)
+                last_unit = unit
+    #last window
+    sum_line = '%s\t%s\t%s' %('\t'.join(last_unit[:10]), str(data[last_win]['mC']), str(data[last_win]['C'])) 
+    print >> ofile, sum_line
+    return outfile
+
+
+
 ##run function with parameters using multiprocess of #cpu
 #def multiprocess_pool_fisher(parameters, cpu):
 #    pool = mp.Pool(int(cpu))
@@ -456,7 +516,7 @@ write.table(x_1, file="%s", sep="\\t", quote=FALSE, row.names=FALSE, col.names=F
 #        collect_list.append(x)
 #    return collect_list
  
-def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, prefix):
+def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, prefix, diff_mC_per_win):
     print 'Step2. Call DMR by Fisher exact test'
     #bed files for chromosomes
     genome_window = '%s_w%s_s%s.bed' %(prefix, window, step)
@@ -518,6 +578,32 @@ def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, 
         P_adjust_BH('%s.fisher_test.CHG.txt' %(os.path.splitext(genome_window)[0]), 9)
         P_adjust_BH('%s.fisher_test.CHH.txt' %(os.path.splitext(genome_window)[0]), 9)
 
+def Filer_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, prefix, diff_mC_per_win):
+    genome_window = '%s_w%s_s%s.bed' %(prefix, window, step)
+    #filter DMR using DMC
+    if not os.path.exists('%s.fisher_test.CG.P_adjusted_BH.Filter_by_DMC.txt' %(os.path.splitext(genome_window)[0])):
+        DMR_beds = []
+        DMC_beds = []
+        if not os.path.exists('%s.fisher_test.CG.P_adjusted_BH.Chr1.bed' %(os.path.splitext(genome_window)[0])):
+            DMR_beds = sorted(split_chr_files('%s.fisher_test.CG.P_adjusted_BH.txt' %(os.path.splitext(genome_window)[0])))
+        else:
+            DMR_beds = sorted(glob.glob('%s.fisher_test.CG.P_adjusted_BH.Chr*.bed' %(os.path.splitext(genome_window)[0])))
+        if not os.path.exists('%s.cytosine_table.fisher_test.CG.P_adjusted_BH.Chr1.bed' %(prefix)):
+            DMC_beds = sorted(split_chr_files('%s.cytosine_table.fisher_test.CG.P_adjusted_BH.txt' %(prefix)))
+        else:
+            DMC_beds = sorted(glob.glob('%s.cytosine_table.fisher_test.CG.P_adjusted_BH.Chr*.bed' %(prefix))) 
+        print 'DMR beds: %s' %(DMR_beds)
+        print 'DMC beds: %s' %(DMC_beds)
+        for i in range(len(DMR_beds)):
+            print i
+            overlap_chr_file = '%s.DMC_overlap.bed' %(os.path.splitext(DMR_beds[i])[0])
+            overlap = 'bedtools intersect -a %s -b %s -wao > %s' %(DMR_beds[i], DMC_beds[i], overlap_chr_file)
+            if not os.path.exists(overlap_chr_file):
+                os.system(overlap)
+            sum_file = sum_window_diff_methylated_cytosine(overlap_chr_file, diff_mC_per_win)
+        merge_chr = 'cat %s.fisher_test.CG.P_adjusted_BH.Chr*.DMC_overlap.bed.window_sum_diffmC > %s.fisher_test.CG.P_adjusted_BH.Filter_by_DMC.txt' %(os.path.splitext(genome_window)[0], os.path.splitext(genome_window)[0])
+        os.system(merge_chr)
+
 
 def call_DMC(genome, mini_depth, control_methC, treat_methC, cpu, prefix):
 
@@ -540,7 +626,7 @@ def call_DMC(genome, mini_depth, control_methC, treat_methC, cpu, prefix):
         #if not chrs == 'Chr1':
         #    continue
         table = '%s_%s.cytosine_table' %(prefix, chrs)
-        overlap = 'bedtools intersect -a %s -b %s -wao -f 1 -sorted | grep -v "\-1" > %s' %(control_methC_files[i], treat_methC_files[i], table)
+        overlap = '''bedtools intersect -a %s -b %s -wao -f 1 -sorted | awk '$12!~/\-1/' > %s''' %(control_methC_files[i], treat_methC_files[i], table)
         if not os.path.exists(table):
             os.system(overlap)
         chunk_files(table, 100)
@@ -598,7 +684,7 @@ def main():
     #minimum read coverage required to consider cytosine to analysis: used in DMC and DMR, not in methylation call
     mini_depth      = 4
     #minimum number of differetial methylated cytosine required to call DMR
-    diff_mC_per_win = 7
+    diff_mC_per_win = 4
     #fold changes of methylation level(average level among all cytosine in the window) between comparsion control vs. treat in a window
     fold_change     = 1.5
 
@@ -611,13 +697,18 @@ def main():
         methylated_C(args.treat, args.cpu)
 
     #Step2. Call DMC by fisher's exact test
-    #bedtools intersect -a test_1.bed -b test_2.bed -wao -f 1 | grep -v "\-1"| less -S
-    call_DMC(args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project)
+    if not os.path.exists('%s.cytosine_table.fisher_test.CG.P_adjusted_BH.txt' %(args.project)):
+        call_DMC(args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project)
 
     #Step3. Call DMR by fisher's exact test
     window = 200
     step   = 50
-    call_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project)
+    if not os.path.exists('%s_w%s_s%s.fisher_test.CG.P_adjusted_BH.txt' %(args.project, window, step)):
+        call_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project, diff_mC_per_win)
+
+    #Step4. Filter DMR
+    if not os.path.exists('%s_w%s_s%s.fisher_test.CG.P_adjusted_BH.Filter_by_DMC.txt' %(args.project, window, step)):
+        Filer_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project, diff_mC_per_win)
 
 if __name__ == '__main__':
     main()
