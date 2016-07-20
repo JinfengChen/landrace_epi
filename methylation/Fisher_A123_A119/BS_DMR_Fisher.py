@@ -266,13 +266,14 @@ def sum_window_cytosine(infile, mini_depth):
                 unit = re.split(r'\t',line)
                 current_win = '%s_%s_%s' %(unit[0], unit[1], unit[2])
                 #no overlapping cytosine
-                if unit[3] == '.':
-                    sum_line = '%s\tNA\tNA\tNA\tNA\tNA\tNA' %('\t'.join(re.split(r'_', current_win)))
-                    print >> ofile, sum_line
-                    continue
+                #if unit[3] == '.':
+                #    sum_line = '%s\tNA\tNA\tNA\tNA\tNA\tNA' %('\t'.join(re.split(r'_', current_win)))
+                #    print >> ofile, sum_line
+                #    continue
                 #have overlapping cytosine
                 if not current_win == last_win:
-                    #print 'change: %s' %(line)
+                    #current window is not last win
+                    #write last window into file if there is last win record
                     if data.has_key(last_win):
                         for c in ('CG', 'CHG', 'CHH'):
                             if data[last_win][c][2] > 0:
@@ -287,16 +288,35 @@ def sum_window_cytosine(infile, mini_depth):
                         sum_line = '%s\t%s\t%s\t%s\t%s\t%s\t%s' %('\t'.join(re.split(r'_', last_win)), str(data[last_win]['CG'][0]), str(data[last_win]['CG'][1]), str(data[last_win]['CHG'][0]), str(data[last_win]['CHG'][1]), str(data[last_win]['CHH'][0]), str(data[last_win]['CHH'][1]))
                         print >> ofile, sum_line
                         del data[last_win]
+
+                    #update record to current windows
                     last_win    = current_win
                     #mC vs. C
-                    #only consider base has mini_depth coverage
+                    #no overlapping cytosine
+                    if unit[3] == '.':
+                        data[current_win]['CG'][2] = 0
+                        data[current_win]['CHG'][2] = 0
+                        data[current_win]['CHH'][2] = 0
+                        data[current_win]['CG'][1] = 0
+                        data[current_win]['CHG'][1] = 0
+                        data[current_win]['CHH'][1] = 0
+                        continue
+                    #have overlapping cytosine
+                    #consider base has mini_depth coverage
                     if int(unit[11]) >= mini_depth:
                         #total
                         data[current_win][unit[7]][2] += 1
                         #mC
                         if float(unit[12]) < p[unit[7]]:
                             data[current_win][unit[7]][1] += 1
+                    #if not covered by mini_depth or not covered
+                    #just initiate the value
+                    else:
+                        data[current_win][unit[7]][2] += 0
+                        if float(unit[12]) < p[unit[7]]:
+                            data[current_win][unit[7]][1] += 0
                 else:
+                    #current window is last win, add value to existing key
                     #mC vs. C
                     #only consider base has mini_depth coverage
                     if int(unit[11]) >= mini_depth:
@@ -347,12 +367,14 @@ def chr_summary_helper(args):
 #Chr12   23100   23300   1       21      11      6       50      0       Chr12   23100   23300   6       16      5       12      52      0
 def fisher_test_file(infile):
     #print 'in fisher function'
+    #print infile
     ofile = open('%s.fisher_test.txt' %(infile), 'w')
     with open (infile, 'r') as filehd:
         for line in filehd:
             line = line.rstrip()
             if len(line) > 2: 
                 unit = re.split(r'\t',line)
+                #print unit
                 #CG
                 if not 'NA' in [unit[3], unit[4], unit[12], unit[13]]:
                     c1   = int(unit[3])
@@ -571,6 +593,7 @@ def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, 
     if not os.path.exists('%s.fisher_test.txt' %(os.path.splitext(genome_window)[0])):
         os.system(merge_all)
     if not os.path.exists('%s.fisher_test.CG.txt' %(os.path.splitext(genome_window)[0])):
+        time.sleep(60)
         os.system(merge_CG)
         os.system(merge_CHG)
         os.system(merge_CHH)
@@ -595,7 +618,7 @@ def Filer_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu,
         print 'DMR beds: %s' %(DMR_beds)
         print 'DMC beds: %s' %(DMC_beds)
         for i in range(len(DMR_beds)):
-            print i
+            #print i
             overlap_chr_file = '%s.DMC_overlap.bed' %(os.path.splitext(DMR_beds[i])[0])
             overlap = 'bedtools intersect -a %s -b %s -wao > %s' %(DMR_beds[i], DMC_beds[i], overlap_chr_file)
             if not os.path.exists(overlap_chr_file):
