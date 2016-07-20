@@ -120,43 +120,41 @@ def run_methykit(meta, cpu, context, prefix):
 library(methylKit)
 pdf("%s.%s.pdf")
 file.list=list("%s",
-               "%s",
-               "%s",
                "%s")
 
 # read the files to a methylRawList object: myobj
-myobj=read(file.list, sample.id=list("%s","%s","%s","%s"), assembly="MSU7",treatment=c(%s))
+myobj=read(file.list, sample.id=list("%s","%s"), assembly="MSU7",treatment=c(%s))
 
 #Get descriptive stats on methylatio
 # plot methylation statistics on samples in myobj which is a class of methylRawList
 getMethylationStats(myobj[[1]],plot=F,both.strands=F)
 getMethylationStats(myobj[[2]],plot=F,both.strands=F)
-getMethylationStats(myobj[[3]],plot=F,both.strands=F)
-getMethylationStats(myobj[[4]],plot=F,both.strands=F)
+#getMethylationStats(myobj[[3]],plot=F,both.strands=F)
+#getMethylationStats(myobj[[4]],plot=F,both.strands=F)
 getMethylationStats(myobj[[1]],plot=T,both.strands=F)
 getMethylationStats(myobj[[2]],plot=T,both.strands=F)
-getMethylationStats(myobj[[3]],plot=T,both.strands=F)
-getMethylationStats(myobj[[4]],plot=T,both.strands=F)
+#getMethylationStats(myobj[[3]],plot=T,both.strands=F)
+#getMethylationStats(myobj[[4]],plot=T,both.strands=F)
 
 getCoverageStats(myobj[[1]], plot = T, both.strands = F)
 getCoverageStats(myobj[[2]], plot = T, both.strands = F)
-getCoverageStats(myobj[[3]], plot = T, both.strands = F)
-getCoverageStats(myobj[[4]], plot = T, both.strands = F)
+#getCoverageStats(myobj[[3]], plot = T, both.strands = F)
+#getCoverageStats(myobj[[4]], plot = T, both.strands = F)
 
 #filter and normalize
 #filter base with fewer than 4X coverage and more than 99.9 percetile of coverage in each sample?
-filtered.myobj = filterByCoverage(myobj, lo.count = 4, lo.perc = NULL, hi.count = NULL, hi.perc = 99.9)
-normalized.myobj = normalizeCoverage(filtered.myobj)
-myobj = normalized.myobj
+#filtered.myobj = filterByCoverage(myobj, lo.count = 4, lo.perc = NULL, hi.count = NULL, hi.perc = 99.9)
+#normalized.myobj = normalizeCoverage(filtered.myobj)
+#myobj = normalized.myobj
 
 #cluster of sample
 meth=unite(myobj)
 #a correlation matrix
-getCorrelation(meth, plot = T)
+#getCorrelation(meth, plot = T)
 # cluster all samples using correlation distance and plot hiarachical clustering
-clusterSamples(meth, dist="correlation", method="ward", plot=TRUE)
+#clusterSamples(meth, dist="correlation", method="ward", plot=TRUE)
 # principal component anlaysis of all samples.
-PCASamples(meth)
+#PCASamples(meth)
 
 #DMC
 # calculate differential methylation p-values and q-values
@@ -175,7 +173,7 @@ head(myDiff_region25p)
 write.table(myDiff_region, file="%s.%s.DMR.txt", sep="\\t", quote=FALSE)
 
 dev.off()
-''' %(prefix, context, files[0], files[1], files[2], files[3], sample[0], sample[1], sample[2], sample[3], ','.join(design), prefix, context, prefix, context)
+''' %(prefix, context, files[0], files[1], sample[0], sample[1], ','.join(design), prefix, context, prefix, context)
     Rscript = '%s.%s.methykit.R' %(prefix, context)
     ofile = open(Rscript, 'w')
     print >> ofile, Rcmd
