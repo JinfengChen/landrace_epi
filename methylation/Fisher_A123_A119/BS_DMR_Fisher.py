@@ -246,12 +246,14 @@ def methylated_C(infile, cpu):
 #summary mC vs. C for each window in each context
 #Chr1    850     1050    Chr1    1001    1001    C       CHH     CT      1.0     1       1       0
 #Chr1    850     1050    Chr1    1006    1006    C       CHH     CC      0.0     0       1       0
+#output:
+#Chr1    850     1050	notmCG	mCG	#CG	notmCHG     mCHG    #CHG  notmCHH    mCHH    #CHH 
 def sum_window_cytosine(infile, mini_depth):
     #p value for methylated C for each context
-    p = defaultdict(lambda : float())
-    p['CG'] = 0.001
-    p['CHG'] = 0.001
-    p['CHH'] = 0.001
+    #p = defaultdict(lambda : float())
+    #p['CG'] = 0.001
+    #p['CHG'] = 0.001
+    #p['CHH'] = 0.001
     outfile = '%s.window_sum' %(infile)
     if os.path.exists(outfile):
         return outfile
@@ -285,7 +287,7 @@ def sum_window_cytosine(infile, mini_depth):
                             else:
                                 data[last_win][c][0] = 'NA'
                                 data[last_win][c][1] = 'NA'
-                        sum_line = '%s\t%s\t%s\t%s\t%s\t%s\t%s' %('\t'.join(re.split(r'_', last_win)), str(data[last_win]['CG'][0]), str(data[last_win]['CG'][1]), str(data[last_win]['CHG'][0]), str(data[last_win]['CHG'][1]), str(data[last_win]['CHH'][0]), str(data[last_win]['CHH'][1]))
+                        sum_line = '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' %('\t'.join(re.split(r'_', last_win)), str(data[last_win]['CG'][0]), str(data[last_win]['CG'][1]), str(data[last_win]['CG'][3]), str(data[last_win]['CHG'][0]), str(data[last_win]['CHG'][1]), str(data[last_win]['CHG'][3]), str(data[last_win]['CHH'][0]), str(data[last_win]['CHH'][1]), str(data[last_win]['CHH'][3]))
                         print >> ofile, sum_line
                         del data[last_win]
 
@@ -302,29 +304,21 @@ def sum_window_cytosine(infile, mini_depth):
                         data[current_win]['CHH'][1] = 0
                         continue
                     #have overlapping cytosine
-                    #consider base has mini_depth coverage
+                    #base has mini_depth coverage
                     if int(unit[11]) >= mini_depth:
-                        #total
-                        data[current_win][unit[7]][2] += 1
-                        #mC
-                        if float(unit[12]) < p[unit[7]]:
-                            data[current_win][unit[7]][1] += 1
-                    #if not covered by mini_depth or not covered
-                    #just initiate the value
-                    else:
-                        data[current_win][unit[7]][2] += 0
-                        if float(unit[12]) < p[unit[7]]:
-                            data[current_win][unit[7]][1] += 0
+                        data[current_win][unit[7]][3] += 1
+                    #total
+                    data[current_win][unit[7]][2] += int(unit[11])
+                    #mC
+                    data[current_win][unit[7]][1] += int(unit[10])
                 else:
                     #current window is last win, add value to existing key
                     #mC vs. C
                     #only consider base has mini_depth coverage
                     if int(unit[11]) >= mini_depth:
-                        #total cytosine
-                        data[current_win][unit[7]][2] += 1
-                        #mC
-                        if float(unit[12]) < p[unit[7]]:
-                            data[current_win][unit[7]][1] += 1
+                        data[current_win][unit[7]][3] += 1
+                    data[current_win][unit[7]][2] += int(unit[11])
+                    data[current_win][unit[7]][1] += int(unit[10])
     #last window
     for c in ('CG', 'CHG', 'CHH'):
         if data[last_win][c][2] > 0:
@@ -336,7 +330,7 @@ def sum_window_cytosine(infile, mini_depth):
         else:
             data[last_win][c][0] = 'NA'
             data[last_win][c][1] = 'NA'
-    sum_line = '%s\t%s\t%s\t%s\t%s\t%s\t%s' %('\t'.join(re.split(r'_', last_win)), str(data[last_win]['CG'][0]), str(data[last_win]['CG'][1]), str(data[last_win]['CHG'][0]), str(data[last_win]['CHG'][1]), str(data[last_win]['CHH'][0]), str(data[last_win]['CHH'][1]))
+    sum_line = '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' %('\t'.join(re.split(r'_', last_win)), str(data[last_win]['CG'][0]), str(data[last_win]['CG'][1]), str(data[last_win]['CG'][3]), str(data[last_win]['CHG'][0]), str(data[last_win]['CHG'][1]), str(data[last_win]['CHG'][3]), str(data[last_win]['CHH'][0]), str(data[last_win]['CHH'][1]), str(data[last_win]['CHH'][3]))
     print >> ofile, sum_line 
     return outfile
 
@@ -362,10 +356,10 @@ def chr_summary(bed, mini_depth, control_methC, treat_methC):
 
 def chr_summary_helper(args):
     return chr_summary(*args)
-
-#			 CG	 mCG	 CHG	 mCHG	 CHH	 mCHH
-#Chr12   23100   23300   1       21      11      6       50      0       Chr12   23100   23300   6       16      5       12      52      0
-def fisher_test_file(infile):
+#			3        4      5      6       7       8         9       10     11      12      13     14     15       16      17     18      19    20     21      22    23
+#			 CG	 mCG	#CG    CHG     mCHG    #CHG    	 CHH	 mCHH   #CHH
+#Chr12   23100   23300   1       21  	N      11      6       N         50      0       N     Chr12   23100   23300   6       16      N      5       12     N     52      0     N
+def fisher_test_file(infile, mini_site):
     #print 'in fisher function'
     #print infile
     ofile = open('%s.fisher_test.txt' %(infile), 'w')
@@ -376,35 +370,44 @@ def fisher_test_file(infile):
                 unit = re.split(r'\t',line)
                 #print unit
                 #CG
-                if not 'NA' in [unit[3], unit[4], unit[12], unit[13]]:
-                    c1   = int(unit[3])
-                    mc1  = int(unit[4])
-                    c2   = int(unit[12])
-                    mc2  = int(unit[13])
-                    oddsratio, pvalue  = fisher_exact([[c1, mc1], [c2, mc2]])
-                    print >> ofile, '%s\t%s\t%s\tCG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(c1), str(mc1), str(c2), str(mc2), str(pvalue))
+                if not 'NA' in [unit[3], unit[4], unit[15], unit[16]]:
+                    if int(unit[5]) <= mini_site or int(unit[17]) <= mini_site:
+                        print >> ofile, '%s\t%s\t%s\tCG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[3], unit[4], unit[15], unit[16], 'NA')  
+                    else:
+                        c1   = int(unit[3])
+                        mc1  = int(unit[4])
+                        c2   = int(unit[15])
+                        mc2  = int(unit[16])
+                        oddsratio, pvalue  = fisher_exact([[c1, mc1], [c2, mc2]])
+                        print >> ofile, '%s\t%s\t%s\tCG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(c1), str(mc1), str(c2), str(mc2), str(pvalue))
                 else:
-                    print >> ofile, '%s\t%s\t%s\tCG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[3], unit[4], unit[12], unit[13], 'NA')
+                    print >> ofile, '%s\t%s\t%s\tCG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[3], unit[4], unit[15], unit[16], 'NA')
                 #CHG
-                if not 'NA' in [unit[5], unit[6], unit[14], unit[15]]:
-                    chg1   = int(unit[5])
-                    mchg1  = int(unit[6])
-                    chg2   = int(unit[14])
-                    mchg2  = int(unit[15])
-                    oddsratio, pvalue  = fisher_exact([[chg1, mchg1], [chg2, mchg2]])
-                    print >> ofile, '%s\t%s\t%s\tCHG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(chg1), str(mchg1), str(chg2), str(mchg2), str(pvalue))
+                if not 'NA' in [unit[6], unit[7], unit[18], unit[19]]:
+                    if int(unit[8]) <= mini_site or int(unit[20]) <= mini_site:
+                        print >> ofile, '%s\t%s\t%s\tCHG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[6], unit[7], unit[18], unit[19], 'NA')
+                    else:
+                        chg1   = int(unit[6])
+                        mchg1  = int(unit[7])
+                        chg2   = int(unit[18])
+                        mchg2  = int(unit[19])
+                        oddsratio, pvalue  = fisher_exact([[chg1, mchg1], [chg2, mchg2]])
+                        print >> ofile, '%s\t%s\t%s\tCHG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(chg1), str(mchg1), str(chg2), str(mchg2), str(pvalue))
                 else:
-                    print >> ofile, '%s\t%s\t%s\tCHG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[5], unit[6], unit[14], unit[15], 'NA')
+                    print >> ofile, '%s\t%s\t%s\tCHG\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[6], unit[7], unit[18], unit[19], 'NA')
                 #CHH
-                if not 'NA' in [unit[7], unit[8], unit[16], unit[17]]:
-                    chh1   = int(unit[7])
-                    mchh1  = int(unit[8])
-                    chh2   = int(unit[16])
-                    mchh2  = int(unit[17])        
-                    oddsratio, pvalue  = fisher_exact([[chh1, mchh1], [chh2, mchh2]])
-                    print >> ofile, '%s\t%s\t%s\tCHH\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(chh1), str(mchh1), str(chh2), str(mchh2), str(pvalue))                
+                if not 'NA' in [unit[9], unit[10], unit[21], unit[22]]:
+                    if int(unit[11]) <= mini_site or int(unit[23]) <= mini_site:
+                        print >> ofile, '%s\t%s\t%s\tCHH\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[9], unit[10], unit[21], unit[22], 'NA')
+                    else:
+                        chh1   = int(unit[9])
+                        mchh1  = int(unit[10])
+                        chh2   = int(unit[21])
+                        mchh2  = int(unit[22])        
+                        oddsratio, pvalue  = fisher_exact([[chh1, mchh1], [chh2, mchh2]])
+                        print >> ofile, '%s\t%s\t%s\tCHH\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], str(chh1), str(mchh1), str(chh2), str(mchh2), str(pvalue))                
                 else:
-                    print >> ofile, '%s\t%s\t%s\tCHH\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[7], unit[8], unit[16], unit[17], 'NA')
+                    print >> ofile, '%s\t%s\t%s\tCHH\t%s\t%s\t%s\t%s\t%s' %(unit[0], unit[1], unit[2], unit[9], unit[10], unit[21], unit[22], 'NA')
     ofile.close()
     return 1
 
@@ -428,7 +431,7 @@ def DMC_fisher_test_file(infile, mini_depth):
                     oddsratio, pvalue  = fisher_exact([[c1, mc1], [c2, mc2]])
                     unit[20] = str(pvalue)
                     print >> ofile, '\t'.join(unit)
-                elif int(unit[8]) < 4 or int(unit[18]) < 4:
+                elif int(unit[8]) < int(mini_depth) or int(unit[18]) < int(mini_depth):
                     unit[20] = 'NA'
                     print >> ofile, '\t'.join(unit)
                 else:
@@ -538,7 +541,7 @@ def sum_window_diff_methylated_cytosine(infile, mini_diff):
 #        collect_list.append(x)
 #    return collect_list
  
-def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, prefix, diff_mC_per_win):
+def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, prefix, diff_mC_per_win, mini_site):
     print 'Step2. Call DMR by Fisher exact test'
     #bed files for chromosomes
     genome_window = '%s_w%s_s%s.bed' %(prefix, window, step)
@@ -580,7 +583,7 @@ def call_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu, 
         chunks = glob.glob('%s_part*' %(table)) 
         parameters = []
         for chunk in chunks:
-            parameters.append([chunk])
+            parameters.append([chunk, mini_site])
         tester = '%s_part00.fisher_test.txt' %(table)
         if not os.path.exists(tester):
             multiprocess_pool(fisher_test_helper, parameters, cpu)
@@ -605,28 +608,32 @@ def Filer_DMR(window, step, genome, mini_depth, control_methC, treat_methC, cpu,
     genome_window = '%s_w%s_s%s.bed' %(prefix, window, step)
     #filter DMR using DMC
     if not os.path.exists('%s.fisher_test.CG.P_adjusted_BH.Filter_by_DMC.txt' %(os.path.splitext(genome_window)[0])):
-        DMR_beds = []
-        DMC_beds = []
-        if not os.path.exists('%s.fisher_test.CG.P_adjusted_BH.Chr1.bed' %(os.path.splitext(genome_window)[0])):
-            DMR_beds = sorted(split_chr_files('%s.fisher_test.CG.P_adjusted_BH.txt' %(os.path.splitext(genome_window)[0])))
-        else:
-            DMR_beds = sorted(glob.glob('%s.fisher_test.CG.P_adjusted_BH.Chr*.bed' %(os.path.splitext(genome_window)[0])))
-        if not os.path.exists('%s.cytosine_table.fisher_test.CG.P_adjusted_BH.Chr1.bed' %(prefix)):
-            DMC_beds = sorted(split_chr_files('%s.cytosine_table.fisher_test.CG.P_adjusted_BH.txt' %(prefix)))
-        else:
-            DMC_beds = sorted(glob.glob('%s.cytosine_table.fisher_test.CG.P_adjusted_BH.Chr*.bed' %(prefix))) 
-        print 'DMR beds: %s' %(DMR_beds)
-        print 'DMC beds: %s' %(DMC_beds)
-        for i in range(len(DMR_beds)):
-            #print i
-            overlap_chr_file = '%s.DMC_overlap.bed' %(os.path.splitext(DMR_beds[i])[0])
-            overlap = 'bedtools intersect -a %s -b %s -wao > %s' %(DMR_beds[i], DMC_beds[i], overlap_chr_file)
-            if not os.path.exists(overlap_chr_file):
-                os.system(overlap)
-            sum_file = sum_window_diff_methylated_cytosine(overlap_chr_file, diff_mC_per_win)
-        merge_chr = 'cat %s.fisher_test.CG.P_adjusted_BH.Chr*.DMC_overlap.bed.window_sum_diffmC > %s.fisher_test.CG.P_adjusted_BH.Filter_by_DMC.txt' %(os.path.splitext(genome_window)[0], os.path.splitext(genome_window)[0])
-        os.system(merge_chr)
-
+        for context in ["CG", "CHG", "CHH"]:
+            DMR_beds = []
+            DMC_beds = []
+            if not os.path.exists('%s.fisher_test.%s.P_adjusted_BH.Chr1.bed' %(os.path.splitext(genome_window)[0], context)):
+                DMR_beds = sorted(split_chr_files('%s.fisher_test.%s.P_adjusted_BH.txt' %(os.path.splitext(genome_window)[0], context)))
+            else:
+                DMR_beds = sorted(glob.glob('%s.fisher_test.%s.P_adjusted_BH.Chr*.bed' %(os.path.splitext(genome_window)[0], context)))
+            if not os.path.exists('%s.cytosine_table.fisher_test.%s.P_adjusted_BH.Chr1.bed' %(prefix, context)):
+                DMC_beds = sorted(split_chr_files('%s.cytosine_table.fisher_test.%s.P_adjusted_BH.txt' %(prefix, context)))
+            else:
+                DMC_beds = sorted(glob.glob('%s.cytosine_table.fisher_test.%s.P_adjusted_BH.Chr*.bed' %(prefix, context))) 
+            #print 'DMR beds: %s' %(DMR_beds)
+            #print 'DMC beds: %s' %(DMC_beds)
+            for i in range(len(DMR_beds)):
+                #print i
+                overlap_chr_file = '%s.DMC_overlap.bed' %(os.path.splitext(DMR_beds[i])[0])
+                overlap = 'bedtools intersect -a %s -b %s -wao > %s' %(DMR_beds[i], DMC_beds[i], overlap_chr_file)
+                if not os.path.exists(overlap_chr_file):
+                    os.system(overlap)
+                sum_file = sum_window_diff_methylated_cytosine(overlap_chr_file, diff_mC_per_win)
+            merge_chr = 'cat %s.fisher_test.%s.P_adjusted_BH.Chr*.DMC_overlap.bed.window_sum_diffmC > %s.fisher_test.%s.P_adjusted_BH.Filter_by_DMC.txt' %(os.path.splitext(genome_window)[0], context, os.path.splitext(genome_window)[0], context)
+            pvalue    = '''awk '$9 <= 0.05 && $11 >= %s' %s.fisher_test.%s.P_adjusted_BH.Filter_by_DMC.txt > %s.fisher_test.%s.P_adjusted_BH.Filter_by_DMC.P0.05.Diff4mC.txt''' %(diff_mC_per_win, os.path.splitext(genome_window)[0], context, os.path.splitext(genome_window)[0], context)
+            qvalue    = '''awk '$10 <= 0.05 && $11 >= %s' %s.fisher_test.%s.P_adjusted_BH.Filter_by_DMC.txt > %s.fisher_test.%s.P_adjusted_BH.Filter_by_DMC.Q0.05.Diff4mC.txt''' %(diff_mC_per_win, os.path.splitext(genome_window)[0], context, os.path.splitext(genome_window)[0], context)
+            os.system(merge_chr)
+            os.system(pvalue)
+            os.system(qvalue)
 
 def call_DMC(genome, mini_depth, control_methC, treat_methC, cpu, prefix):
 
@@ -706,6 +713,8 @@ def main():
     ##cutoff setting
     #minimum read coverage required to consider cytosine to analysis: used in DMC and DMR, not in methylation call
     mini_depth      = 4
+    #minimum cytosine site in window
+    mini_site       = 4
     #minimum number of differetial methylated cytosine required to call DMR
     diff_mC_per_win = 4
     #fold changes of methylation level(average level among all cytosine in the window) between comparsion control vs. treat in a window
@@ -727,7 +736,7 @@ def main():
     window = 200
     step   = 50
     if not os.path.exists('%s_w%s_s%s.fisher_test.CG.P_adjusted_BH.txt' %(args.project, window, step)):
-        call_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project, diff_mC_per_win)
+        call_DMR(window, step, args.genome, mini_depth, control_methC, treat_methC, args.cpu, args.project, diff_mC_per_win, mini_site)
 
     #Step4. Filter DMR
     if not os.path.exists('%s_w%s_s%s.fisher_test.CG.P_adjusted_BH.Filter_by_DMC.txt' %(args.project, window, step)):
